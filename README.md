@@ -1,180 +1,106 @@
 # Athlete Scoring — Sogility
 
-> How can a training score explain both peer standing and progress without penalizing younger athletes?
+> How can a training score explain peer context and recent performance?
 
-**Industry practicum · public methodology**
+**Industry practicum · Python reference implementation · synthetic validation**
 
-A dual scoring framework separates cohort-relative standing from fixed performance benchmarks, with distinct parent and trainer views.
-
-[Case study](https://daniel-kang-vs.github.io/projects/sogility.html) · [Source evidence](https://github.com/daniel-kang-vs/sogility-athlete-scoring/blob/main/README.md)
-
-## Highlights
-
-- **30–99 display scale**
-- **Two complementary scores**
-- **Five skill groups**
+[Portfolio case study](https://daniel-kang-vs.github.io/projects/sogility.html) · [Validation and limitations](VALIDATION.md)
 
 ## The problem
 
-A global drill score compares young players with older athletes and obscures what to train next. Small cohorts and noisy repeat attempts make a raw rank unstable.
+Global comparisons can obscure developmental differences between athletes. Repeated attempts are noisy, and small cohorts can produce unstable benchmarks. This project separates a cohort-relative score (RPS) from an assessment-based performance band (APS), supporting distinct parent and trainer views.
 
-## Data & scope
+## Public evidence
 
-The analysis used an internal session extract. The public repository contains an anonymized methodology writeup, not player-level data, executable scoring code, or a hosted dashboard.
+This repository now includes importable extracts from Daniel's supplied `sigmoid_cohort.py` and `final_aps.py` notebook exports. Personal examples, notebook links, confidential input data, and internal interfaces are excluded. The original files remain unchanged locally. These are analytical reference implementations, not evidence of a production deployment.
 
-## How it works
+## Scoring logic
 
-1. Normalize drill direction and skew before comparing results.
-2. Fit relative scoring to age-and-gender cohorts and blend toward the wider population when a cohort is small.
-3. Weight the three most recent attempts 0.5, 0.3 and 0.2.
-4. Compute performance bands separately from reference quantile anchors, then rescale for display.
+### RPS: relative performance
 
-## Key technical decision
+- Log-transform selected drills and orient results so higher means better.
+- Fit median and 75th-percentile span to the age-and-gender cohort when it has at least 30 **attempt observations**. Otherwise use the same age group across genders; invalid parameters fall back to global benchmarks.
+- Map oriented results through `30 + 69 / (1 + exp(-z))`, with `z = 1.0986 * (x - median) / abs(span - median)`.
+- Combine the newest three attempts with 0.50 / 0.30 / 0.20 weights. Two attempts use 2/3 and 1/3; one uses 100%.
+- Average assessment scores for the overall player score. A score of 75 is **not** an empirical 75th percentile. The benchmark median maps to 64.5.
 
-Keep relative standing separate from the performance band. A player’s band should not change simply because different peers enter the cohort; benchmark anchors need versioning to preserve that behavior.
+```python
+from sigmoid_cohort import compare_global_vs_cohort_sigmoid_rps
 
-## Results & interpretation
+attempts, global_params, cohort_params, age_params, diagnostics = (
+    compare_global_vs_cohort_sigmoid_rps(
+        prepared_attempts,
+        skill_type_map={"Freelap 10yd Dash": "Log"},
+        good_direction_map={"Freelap 10yd Dash": "Lo"},
+    )
+)
+player_scores = diagnostics["overall_player_rps"]
+```
 
-The framework explains one athlete through a peer-relative score and a separate performance band. Parent views emphasize progress and five skills; trainer views emphasize entry, comparison, and history. The repository documents the design and handoff.
+Supply all applicable drill mappings explicitly: unmapped RPS drills default to normal / higher-is-better. The RPS function takes raw scores and logs inside the function.
 
-## Limitations & next steps
+### APS: performance bands
 
-No match-outcome labels were available to validate game-performance prediction. The proposed production handoff ports deterministic scoring to Elixir and checks it against Python fixtures; the public repository does not establish that this deployment occurred.
+- Build benchmarks from each player's **latest attempt per assessment**, preventing repeat attempts from increasing that player's benchmark weight.
+- Use age-and-gender cohorts with at least 30 players per assessment; otherwise combine genders within the age group. This implementation has **no global APS fallback**.
+- Interpolate through q30 / q50 / q70 / q90 anchors to 30 / 50 / 70 / 90; clip APS to **0–100**.
+- Weight recent attempts using the same recency rules as RPS, average assessments within each skill category, then equally average available categories.
+- Assign Foundation (<30), Developing (30–<50), Approaching (50–<70), Strong (70–<90), or Elite (≥90).
 
-## Evidence & reproducibility
+```python
+from final_aps import run_aps
 
-Public evidence is the anonymized README methodology; confidential player records and internal interfaces are excluded.
+result = run_aps(prepared_aps_attempts)
+player_bands = result["players"]
+benchmark_audit = result["small_samples"]
+```
+
+APS input scores must already be log-transformed for the selected log-type drills, as in the notebook preprocessing. Include the boolean `higher_is_better` column. Do not log the same input twice. Category mapping excludes unmapped drills and returns an audit table.
+
+## Input contract
+
+Both entry points accept a pandas DataFrame with `category_assessment`, `score`, `timestamp`, `gender_clean`, `age_group`, and `cohort`. Default identity is `first_name` + `last_name` + gender + age group; public examples use synthetic identifiers. RPS supports `player_id_col`; APS uses `athlete_id` when provided. APS also requires `higher_is_better`. Clean invalid timestamps, non-finite scores, and nonpositive log inputs before calling APS. Use stable player IDs for any real integration.
+
+## Run and inspect
+
+Python 3.12 was used for local verification. From the repository root:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python -m unittest discover -s tests -v
+python validate_stability.py
+```
+
+The examples in the tests generate synthetic data in memory. No confidential CSV is needed. The validation script writes `validation/results.json` deterministically with seed 42.
+
+## Results and interpretation
+
+**13 functional checks pass**, including score bounds, monotonicity, recency weights, benchmark grain, fallback selection, input-row ordering, and degenerate distributions. In one synthetic 1% noise experiment, mean absolute changes were **0.45 RPS points** and **0.45 APS points**. This is a limited sensitivity experiment, not a general stability guarantee.
+
+A deliberately separated age/gender stress case produced a **23.82-point RPS jump** when a cohort crossed from 29 to 30 observations. Lower-is-better APS anchors also require review. See [VALIDATION.md](VALIDATION.md) for exact limitations and safeguards added during packaging.
+
+## Report versus executable implementation
+
+The final report identifies these two filenames, but some narrative details differ from their code:
+
+- RPS uses hard benchmark fallback, not gradual cohort/global blending.
+- APS uses q30/q50/q70/q90 and 0–100, not q10/q25/q50/q75/q90 with a 30–99 rescale.
+- Two-attempt weights are 2/3 and 1/3, not renormalized 0.5 and 0.3.
+- APS benchmarks are recalculated on each run, so bands are not fixed over time. Frozen, versioned benchmark tables are a next step.
+
+This README describes the executable implementation. Neither these tests nor the report establishes prediction of match performance; outcome labels were unavailable.
 
 ## Repository guide
 
-- [`README.md`](README.md) — methodology and handoff.
+- `sigmoid_cohort.py` — RPS scoring, aggregation, and diagnostics.
+- `final_aps.py` — APS scoring, category aggregation, and audit tables.
+- `tests/test_scoring.py` — synthetic functional tests.
+- `validate_stability.py` — reproducible sensitivity and edge-case probes.
+- `validation/results.json` — recorded probe results.
+- `VALIDATION.md` — limitations, provenance, and packaging changes.
 
-## Run or inspect
+## Product and handoff
 
-Use the source links above. Confidential data and internal application code are not distributed; there is no public dashboard to run.
-
-## Technology
-
-Python · SQL · React
-
----
-
-## Technical appendix
-
-## Scoring
-
-```
-Session extract (SQL / warehouse)
-        │
-        ▼
-Clean: drop or flag outliers, flip lower-is-better drills, log skewed drills
-        │
-        ├── RPS (the number on the screen, the SGI score)
-        │     cohort median and cohort span
-        │     same sigmoid as before
-        │     blend toward the global distribution when n is small
-        │     last 3 attempts weighted 0.5, 0.3, 0.2
-        │
-        └── APS (the band)
-              piecewise map through the 10th, 25th, 50th, 75th, 90th
-              if the cohort is thin: both genders in the age group, then the wider pool
-        │
-        ▼
-Linear rescale onto 30–99
-        │
-        ▼
-Band from APS: Foundation, Developing, Approaching, Strong, Elite
-```
-
-### Relative Performance Score
-
-RPS answers “how does this player compare with similar players?”
-
-The score is percentile-like, but a score of 75 does not establish that the athlete outperformed exactly 75% of peers. It is not an empirical rank. The raw attempt is standardized with that cohort’s median and span, then passed through the same sigmoid. When the cohort is too small to trust, cohort and global parameters are blended by sample size, so the score moves gradually instead of snapping to a fallback table.
-
-Recency, for the three most recent attempts, oldest to newest in the weight list below:
-
-| Attempt | Weight |
-|---------|--------|
-| Most recent | 0.50 |
-| One back | 0.30 |
-| Two back | 0.20 |
-
-Fewer than three attempts: the same weights, renormalized.
-
-### Absolute Performance Score
-
-APS answers “how strong is this result, apart from who else trained this month?”
-
-The raw result is mapped by piecewise interpolation through the 10th, 25th, 50th, 75th, and 90th percentiles of the reference distribution. Those anchors are the benchmark. If the cohort does not have enough mass, the benchmark widens in order: both genders in the age group, then the broader pool. Direction is fixed first, so a faster dash and a higher pass count both point up. Skewed drills are logged before that map.
-
-### The 30–99 display scale
-
-Both scores are linearly rescaled onto 30–99 after the statistical step. The product rule was explicit: scores under 30 read as a foundation level and were kept off the usual display so a young player is not handed a 12, and 99 leaves the best player room to move. Bands are cut on the APS value, not on RPS, so the label does not change just because a new player joined the cohort.
-
-| Band | APS on the 30–99 scale |
-|------|------------------------|
-| Foundation | below 30 |
-| Developing | 31–49 |
-| Approaching | 50–69 |
-| Strong | 70–89 |
-| Elite | 90 and above |
-
-What the screen shows: **RPS is the score. APS is the band.**
-
----
-
-## What was tried and left out of the parent view
-
-Players are specialized. A single overall number hides that. K-means on the five skill scores produced four readable profiles: playmaker (passing and vision), explosive athlete (agility), attacker (dribbling), and control (first touch and passing).
-
-Those labels did not ship on the parent view. A type encourages a kid to specialize, which is the opposite of the training goal. The clustering writeup stayed with the company for trainer-side use.
-
----
-
-## Product
-
-Two interfaces on the same player record.
-
-| View | Job |
-|------|-----|
-| Parent and trainee | One score, five skill bars, a band, and progress over time |
-| Trainer | Fast score entry during a session, cohort comparison, assessment history |
-
-The layout follows a FIFA-style card: the number first, then the skills, then the trend. The prototype is React and TypeScript. Scoring was developed and checked in Python. Production at Sogility is Elixir, so the handoff was to port the deterministic math into Elixir and validate it against the Python fixtures, not to stand up a separate Python service. Session rows in production are read through the existing database. The CSV was the analysis extract.
-
-Python stayed the place for the statistical work: distribution checks, the sigmoid versus quantile comparison, the cohort-size blend, and the archetype exploration.
-
----
-
-## Key Technical Decisions
-
-1. **Keep the sigmoid. Change who it is fit to.** Parents already had a percentile-like number. Replacing the curve would have thrown away a model the company could explain. The bias was the global reference group.
-
-2. **Do not let the band come from the rank.** RPS is supposed to move when the cohort moves. If the Elite label moved with it, a player could change tier without changing their drill results. Bands come from APS.
-
-3. **Shrink small groups instead of dropping them.** A hard minimum sample size leaves new sites with no score. A sample-size blend keeps a score and tells the truth about how local it is.
-
-4. **Weight the last three attempts.** Repeated measures on the same drill were too noisy to treat the latest row as ability.
-
-5. **No player-type label on the parent screen.** The cluster structure is real. Publishing it fights the product.
-
----
-
-## What this does not prove
-
-There is no match outcome, coach grade, or competitive result in the extract. The scores are a measurement system. They are not a validated predictor of game performance. A later version can test them against those outcomes. Until then, the claim is interpretability and stability, not predictive accuracy.
-
-The player file is not in this repository.
-
----
-
-## Tech Stack
-
-| Layer | Role |
-|-------|------|
-| SQL | Extract session rows and feed the scoring pipeline |
-| Python | Distributions, cohort sigmoid, quantile APS, clustering experiments |
-| TypeScript / React | Parent and trainer prototype |
-| Elixir | Recommended production port of the same deterministic scoring |
-
+The broader practicum explored parent views for score, skills and history, and trainer views for entry and comparison. Python holds the analytical reference; the React/TypeScript prototype and proposed Elixir production handoff are separate artifacts and are not included here. SQL supported the original extraction work. This repository does not claim that the scoring system was deployed.

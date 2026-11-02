@@ -1,0 +1,31 @@
+{
+  "scope": "Synthetic functional and sensitivity checks, not game-performance validation",
+  "seed": 42,
+  "one_percent_raw_score_noise": {
+    "mean_absolute_rps_change": 0.44998667764926126,
+    "max_absolute_rps_change": 0.9371765765382776
+  },
+  "one_percent_raw_score_noise_aps": {
+    "mean_absolute_aps_change": 0.452,
+    "max_absolute_aps_change": 1.7999999999999972
+  },
+  "single_extreme_outlier_other_players": {
+    "mean_absolute_rps_change": 0.0,
+    "max_absolute_rps_change": 0.0
+  },
+  "29_to_30_observations_stress_case": {
+    "max_absolute_rps_change": 23.82485224923589,
+    "note": "Age distributions intentionally differ; no universal stability guarantee."
+  },
+  "constant_distribution": {
+    "rps_missing_attempts": 50,
+    "rps_missing_player_scores": 50,
+    "aps_status": "No valid APS scores: check empty input, unmapped drills, or degenerate benchmarks.",
+    "note": "Undefined spans remain missing through RPS aggregation. APS raises an explicit validation error."
+  },
+  "aps_lower_is_better_anchor_probe": {
+    "raw_q50": 50,
+    "returned_score": 70.0,
+    "note": "Reversing non-symmetric quantile anchors maps raw median to 70, not 50. Requires a deliberate anchor-policy review."
+  }
+}
