@@ -1,89 +1,65 @@
 # Athlete Scoring — Sogility
 
-![Python](https://img.shields.io/badge/Python-analysis-blue?logo=python) ![SQL](https://img.shields.io/badge/SQL-extract%20%26%20pipeline-336791?logo=postgresql) ![React](https://img.shields.io/badge/React-parent%20%26%20trainer%20UI-149eca?logo=react)
+> How can a training score explain both peer standing and progress without penalizing younger athletes?
 
-> **Decision:** stop showing parents a raw drill number. Sogility’s old sigmoid turned every drill into one global percentile, and that percentile hid whether a player was actually good. The redesign keeps a statistical score, splits it into a peer score and a stable benchmark, and puts both on a **30–99** scale that parents and trainers can read.
+**Industry practicum · public methodology**
 
-Industry practicum with Sogility, a nationwide soccer training company, for the Purdue MS in Business Analytics and Information Management. Faculty advisor: Shoaib Amjad Khan. Team: Meghna Ashok Advani, Ashwath Raju Srikanth, Daniel Kang, Deniz Nemil, Mansi Anil Patil. May 2026.
+A dual scoring framework separates cohort-relative standing from fixed performance benchmarks, with distinct parent and trainer views.
 
-Daniel’s work on the engagement was the scoring redesign and the parent-facing and trainer-facing interface.
+[Case study](https://daniel-kang-vs.github.io/projects/sogility.html) · [Source evidence](https://github.com/daniel-kang-vs/sogility-athlete-scoring/blob/main/README.md)
 
----
+## Highlights
 
-## Project Highlights
+- **30–99 display scale**
+- **Two complementary scores**
+- **Five skill groups**
 
-- The old model was one sigmoid fit to **every player on a drill**. It flattened developing players and stretched small gaps at the top
-- The replacement is two scores. **RPS** is the number on the screen: a cohort sigmoid, age group by gender, blended toward the global distribution when the cell is small. **APS** places the performance band from quantile anchors
-- Last three attempts are weighted **0.5 / 0.3 / 0.2**, so one noisy rep does not become the player
-- Time-based drills are flipped before scoring. Skewed drills are log-transformed. Everything then lands on **30–99**
-- Parent view answers “how is my child doing?” Trainer view is built for fast entry, comparison, and history
+## The problem
 
----
+A global drill score compares young players with older athletes and obscures what to train next. Small cohorts and noisy repeat attempts make a raw rank unstable.
 
-## Problem Statement
+## Data & scope
 
-A parent was handed a number like **61** with no peer, no level, and no next step. The drills underneath that number are not even on the same scale.
+The analysis used an internal session extract. The public repository contains an anonymized methodology writeup, not player-level data, executable scoring code, or a hosted dashboard.
 
-| Drill type | Example | Direction |
-|------------|---------|-----------|
-| Count | Pass Find, Receive 10 | Higher is better |
-| Time | Freelap dash, Knockout | Lower is better |
+## How it works
 
-The legacy score was a sigmoid. For a raw result \(x\), with the skill’s global median as Mid and its global 99th percentile as Span:
+1. Normalize drill direction and skew before comparing results.
+2. Fit relative scoring to age-and-gender cohorts and blend toward the wider population when a cohort is small.
+3. Weight the three most recent attempts 0.5, 0.3 and 0.2.
+4. Compute performance bands separately from reference quantile anchors, then rescale for display.
 
-```
-SSpan = log(0.99 / 0.01) = 4.5951
-Z     = 4.5951 × (x − Mid) / |Mid − Span|
-RPS   = 100 / (1 + e^(−Z))
-```
+## Key technical decision
 
-That curve is smooth, and it is the wrong comparison. A younger player is scored against older players. The bottom of the curve compresses real gaps, so two developing players look the same. The top of the curve does the opposite. The shape of each drill disappears. And a percentile still does not answer “is this good?”
+Keep relative standing separate from the performance band. A player’s band should not change simply because different peers enter the cohort; benchmark anchors need versioning to preserve that behavior.
 
-There is also no match result or external outcome in the data, so the score cannot be validated as a predictor of game performance. It has to be a measurement system people can explain.
+## Results & interpretation
 
----
+The framework explains one athlete through a peer-relative score and a separate performance band. Parent views emphasize progress and five skills; trainer views emphasize entry, comparison, and history. The repository documents the design and handoff.
 
-## Dataset
+## Limitations & next steps
 
-The practicum used about **12,600** historical session rows and about **1,600** newer rows, covering about **630** players. The export this snapshot comes from has **13,779** rows, **649** players, and **31** drills, from July 2022 through December 2024.
+No match-outcome labels were available to validate game-performance prediction. The proposed production handoff ports deterministic scoring to Elixir and checks it against Python fixtures; the public repository does not establish that this deployment occurred.
 
-The file has no header. Names in the real extract are players, including youth athletes, so they are not in this repository. The rows below use placeholders. Scores and timestamps are from the file.
+## Evidence & reproducibility
 
-| Player | Gender | Age code | Category | Assessment | Score | Timestamp |
-|--------|--------|----------|----------|------------|------:|-----------|
-| Player A | male | F | Circuit Training | Knockout | 35 | 2022-10-03 23:02 |
-| Player A | male | E | Tech Touch | Receive 10 Air | 10 | 2022-10-04 16:57 |
-| Player B | male | E | Circuit Training | Pass Find 1 | 19 | 2022-10-04 17:13 |
-| Player B | male | E | Circuit Training | Knockout | 7 | 2022-10-04 17:15 |
+Public evidence is the anonymized README methodology; confidential player records and internal interfaces are excluded.
 
-| Column | Meaning |
-|--------|---------|
-| Age code | A–F. A is the smallest group (245 rows in this export). C and D are about 4,000 each |
-| Category + assessment | The drill. Examples: Circuit Training × Knockout, Freelap × 10yd Dash, Vertical Jump × Vertical |
-| Score | Raw result. Units differ by drill |
-| Timestamp | When the attempt was recorded |
+## Repository guide
 
-Gender in this export: 7,590 male, 6,189 female.
+- [`README.md`](README.md) — methodology and handoff.
 
-Drills are then mapped into five skills: **passing, vision, dribbling, agility, first touch**.
+## Run or inspect
 
-About 1–1.4% of rows are outliers, mostly on machine-recorded drills (a score of 410 on a drill that does not live there). Those points move a percentile. The recommendation was to flag them at entry, when the trainer can confirm the number, instead of silently deleting them later.
+Use the source links above. Confidential data and internal application code are not distributed; there is no public dashboard to run.
+
+## Technology
+
+Python · SQL · React
 
 ---
 
-## Why the model changed
-
-Three statistical problems, not a request for a more complicated model.
-
-**1. The reference group was everyone.** Relative standing only means something inside a similar age and gender. The sigmoid formula stayed. Mid and Span moved from the global drill distribution to the cohort distribution.
-
-**2. A percentile is not a level.** RPS moves when the cohort moves. Parents also need a label that stays put if the player’s raw result stays put. That label is APS, built from fixed quantile anchors rather than from today’s rank.
-
-**3. One attempt is too noisy.** The same player on the same drill jumps around. The displayed score uses the last three attempts, not the last row.
-
-Small cells are the practical constraint. Some drills have thousands of rows. Others have a few dozen. A raw rank inside a cell of ten players jumps when one athlete is added. The score has to shrink toward a wider distribution instead of pretending that cell is a population.
-
----
+## Technical appendix
 
 ## Scoring
 
@@ -114,7 +90,7 @@ Band from APS: Foundation, Developing, Approaching, Strong, Elite
 
 RPS answers “how does this player compare with similar players?”
 
-A 75 means better than about 75% of the age-and-gender cohort on that skill, before the display rescale. It is not an empirical rank. The raw attempt is standardized with that cohort’s median and span, then passed through the same sigmoid. When the cohort is too small to trust, cohort and global parameters are blended by sample size, so the score moves gradually instead of snapping to a fallback table.
+The score is percentile-like, but a score of 75 does not establish that the athlete outperformed exactly 75% of peers. It is not an empirical rank. The raw attempt is standardized with that cohort’s median and span, then passed through the same sigmoid. When the cohort is too small to trust, cohort and global parameters are blended by sample size, so the score moves gradually instead of snapping to a fallback table.
 
 Recency, for the three most recent attempts, oldest to newest in the weight list below:
 
@@ -201,3 +177,4 @@ The player file is not in this repository.
 | Python | Distributions, cohort sigmoid, quantile APS, clustering experiments |
 | TypeScript / React | Parent and trainer prototype |
 | Elixir | Recommended production port of the same deterministic scoring |
+
